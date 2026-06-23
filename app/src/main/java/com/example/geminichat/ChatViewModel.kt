@@ -1,19 +1,28 @@
 package com.example.geminichat
 
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+
+private val Context.dataStore by preferencesDataStore(name = "settings")
 
 data class ChatMessage(
     val text: String,
@@ -31,13 +40,29 @@ data class ChatSession(
         get() = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()).format(Date(date))
 }
 
-class ChatViewModel : ViewModel() {
-    private val apiKey = BuildConfig.GEMINI_API_KEY
+class ChatViewModel(private val context: Context) : ViewModel() {
+    private val ttsEnabledKey = booleanPreferencesKey("tts_enabled")
+    private val modelNameKey = stringPreferencesKey("model_name")
+    private val apiKeyKey = stringPreferencesKey("api_key")
+
+    private var _apiKey = BuildConfig.GEMINI_API_KEY
+    private var _modelName = "gemini-2.5-flash"
     
-    private val generativeModel = GenerativeModel(
-        modelName = "gemini-2.5-flash",
-        apiKey = apiKey
+    private val _isTtsEnabled = MutableStateFlow(true)
+    val isTtsEnabled = _isTtsEnabled.asStateFlow()
+
+    private val _currentModel = MutableStateFlow(_modelName)
+    val currentModel = _currentModel.asStateFlow()
+
+    private val _customApiKey = MutableStateFlow(_apiKey)
+    val customApiKey = _customApiKey.asStateFlow()
+
+    private var generativeModel = GenerativeModel(
+        modelName = _modelName,
+        apiKey = _apiKey
     )
+
+    private var chat = generativeModel.startChat()
 
     private val _sessions = mutableStateListOf<ChatSession>()
     val sessions: List<ChatSession> = _sessions
@@ -51,7 +76,57 @@ class ChatViewModel : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
 
-    private var chat = generativeModel.startChat()
+    init {
+        viewModelScope.launch {
+            context.dataStore.data.map { it[ttsEnabledKey] ?: true }.collect {
+                _isTtsEnabled.value = it
+            }
+        }
+        viewModelScope.launch {
+            context.dataStore.data.map { it[modelNameKey] ?: "gemini-2.5-flash" }.collect {
+                _modelName = it
+                _currentModel.value = it
+                updateModel()
+            }
+        }
+        viewModelScope.launch {
+            context.dataStore.data.map { it[apiKeyKey] ?: BuildConfig.GEMINI_API_KEY }.collect {
+                _apiKey = it
+                _customApiKey.value = it
+                updateModel()
+            }
+        }
+    }
+
+    private fun updateModel() {
+        generativeModel = GenerativeModel(
+            modelName = _modelName,
+            apiKey = _apiKey
+        )
+        // Re-initialize chat
+        val history = _messages.map {
+            content(role = if (it.isUser) "user" else "model") { text(it.text) }
+        }
+        chat = generativeModel.startChat(history = history)
+    }
+
+    fun setTtsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            context.dataStore.edit { it[ttsEnabledKey] = enabled }
+        }
+    }
+
+    fun setModel(modelName: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { it[modelNameKey] = modelName }
+        }
+    }
+
+    fun setApiKey(apiKey: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { it[apiKeyKey] = apiKey }
+        }
+    }
 
     fun createNewSession() {
         if (_messages.isNotEmpty() && _currentSessionId.value != null) {
@@ -65,7 +140,6 @@ class ChatViewModel : ViewModel() {
     fun selectSession(sessionId: String) {
         if (_currentSessionId.value == sessionId) return
         
-        // Save current session before switching
         if (_currentSessionId.value != null) {
             updateCurrentSessionInList()
         }
@@ -75,7 +149,6 @@ class ChatViewModel : ViewModel() {
         _messages.addAll(session.messages)
         _currentSessionId.value = sessionId
         
-        // Reconstruct chat history for the SDK
         val history = session.messages.map { 
             content(role = if (it.isUser) "user" else "model") { text(it.text) }
         }
@@ -108,7 +181,6 @@ class ChatViewModel : ViewModel() {
             _sessions.add(0, newSession)
         }
 
-        // If it's a new session and has at least one message, summarize the title
         if ((currentSession == null || currentSession.title == "New Chat") && _messages.isNotEmpty()) {
             summarizeTitle(currentId, _messages.first().text)
         }
@@ -126,7 +198,6 @@ class ChatViewModel : ViewModel() {
                     _sessions[index] = _sessions[index].copy(title = summary)
                 }
             } catch (e: Exception) {
-                // Keep the default title on error
             }
         }
     }
@@ -144,7 +215,6 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val response = if (bitmap != null) {
-                    // For multimodal (image + text), we use generateContent directly for now as Chat session multimodal support varies
                     val inputContent = content {
                         image(bitmap)
                         text(text)
@@ -164,5 +234,15 @@ class ChatViewModel : ViewModel() {
                 _isLoading.value = false
             }
         }
+    }
+}
+
+class ChatViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return ChatViewModel(context) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

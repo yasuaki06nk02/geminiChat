@@ -88,18 +88,25 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
-    viewModel: ChatViewModel = viewModel(),
     onSpeak: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val viewModel: ChatViewModel = viewModel(factory = ChatViewModelFactory(context))
+    
     val messages = viewModel.messages
     val sessions = viewModel.sessions
     val currentSessionId = viewModel.currentSessionId
     val isLoading by viewModel.isLoading.collectAsState()
+    val isTtsEnabled by viewModel.isTtsEnabled.collectAsState()
+    val currentModel by viewModel.currentModel.collectAsState()
+    val customApiKey by viewModel.customApiKey.collectAsState()
+
     var inputText by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var selectedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     
+    var showSettings by remember { mutableStateOf(false) }
+
     val listState = rememberLazyListState()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -130,7 +137,7 @@ fun ChatScreen(
             val spokenText = results?.get(0) ?: ""
             if (spokenText.isNotBlank()) {
                 viewModel.sendMessage(spokenText) { response ->
-                    onSpeak(response)
+                    if (isTtsEnabled) onSpeak(response)
                 }
             }
         }
@@ -217,6 +224,11 @@ fun ChatScreen(
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Default.Menu, contentDescription = "Menu")
                         }
+                    },
+                    actions = {
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     }
                 )
             },
@@ -283,7 +295,7 @@ fun ChatScreen(
                                         selectedImageUri = null
                                         selectedBitmap = null
                                         viewModel.sendMessage(text, bitmap) { response ->
-                                            onSpeak(response)
+                                            if (isTtsEnabled) onSpeak(response)
                                         }
                                     }
                                 },
@@ -328,6 +340,89 @@ fun ChatScreen(
             }
         }
     }
+
+    if (showSettings) {
+        SettingsDialog(
+            isTtsEnabled = isTtsEnabled,
+            onTtsToggle = { viewModel.setTtsEnabled(it) },
+            currentModel = currentModel,
+            onModelChange = { viewModel.setModel(it) },
+            apiKey = customApiKey,
+            onApiKeyChange = { viewModel.setApiKey(it) },
+            onDismiss = { showSettings = false }
+        )
+    }
+}
+
+@Composable
+fun SettingsDialog(
+    isTtsEnabled: Boolean,
+    onTtsToggle: (Boolean) -> Unit,
+    currentModel: String,
+    onModelChange: (String) -> Unit,
+    apiKey: String,
+    onApiKeyChange: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val models = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview")
+    var expanded by remember { mutableStateOf(false) }
+    var tempApiKey by remember { mutableStateOf(apiKey) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("設定") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("音声読み上げ", modifier = Modifier.weight(1f))
+                    Switch(checked = isTtsEnabled, onCheckedChange = onTtsToggle)
+                }
+                
+                Column {
+                    Text("Gemini モデル", style = MaterialTheme.typography.labelMedium)
+                    Box {
+                        OutlinedButton(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(currentModel)
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            models.forEach { model ->
+                                DropdownMenuItem(
+                                    text = { Text(model) },
+                                    onClick = {
+                                        onModelChange(model)
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    Text("API キー", style = MaterialTheme.typography.labelMedium)
+                    OutlinedTextField(
+                        value = tempApiKey,
+                        onValueChange = { tempApiKey = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("API Keyを入力") }
+                    )
+                    Button(
+                        onClick = { onApiKeyChange(tempApiKey) },
+                        modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
+                    ) {
+                        Text("保存")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("閉じる") }
+        }
+    )
 }
 
 @Composable
