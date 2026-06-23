@@ -1,5 +1,6 @@
 package com.example.geminichat
 
+import android.graphics.Bitmap
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
@@ -16,7 +17,8 @@ import java.util.UUID
 
 data class ChatMessage(
     val text: String,
-    val isUser: Boolean
+    val isUser: Boolean,
+    val bitmap: Bitmap? = null
 )
 
 data class ChatSession(
@@ -129,19 +131,29 @@ class ChatViewModel : ViewModel() {
         }
     }
 
-    fun sendMessage(text: String, onResponse: (String) -> Unit = {}) {
-        if (text.isBlank()) return
+    fun sendMessage(text: String, bitmap: Bitmap? = null, onResponse: (String) -> Unit = {}) {
+        if (text.isBlank() && bitmap == null) return
         
         if (_currentSessionId.value == null) {
             _currentSessionId.value = UUID.randomUUID().toString()
         }
 
-        _messages.add(ChatMessage(text, true))
+        _messages.add(ChatMessage(text, true, bitmap))
         _isLoading.value = true
 
         viewModelScope.launch {
             try {
-                val response = chat.sendMessage(text)
+                val response = if (bitmap != null) {
+                    // For multimodal (image + text), we use generateContent directly for now as Chat session multimodal support varies
+                    val inputContent = content {
+                        image(bitmap)
+                        text(text)
+                    }
+                    generativeModel.generateContent(inputContent)
+                } else {
+                    chat.sendMessage(text)
+                }
+
                 val responseText = response.text ?: "Error: No response"
                 _messages.add(ChatMessage(responseText, false))
                 updateCurrentSessionInList()
