@@ -180,7 +180,7 @@ fun ChatScreen(
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Text(
                     "履歴",
                     modifier = Modifier.padding(16.dp),
@@ -373,12 +373,12 @@ fun SettingsDialog(
 ) {
     val geminiModels = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview")
     val openRouterModels = listOf(
+        "google/gemma-4-31b-it:free",
         "google/gemma-2-9b-it:free",
-        "mistralai/mistral-7b-instruct:free",
-        "microsoft/phi-3-mini-128k-instruct:free",
-        "meta-llama/llama-3-8b-instruct:free",
+        "meta-llama/llama-3.3-70b:free",
+        "mistralai/mistral-small-3.1-24b:free",
         "qwen/qwen-2-7b-instruct:free",
-        "huggingfaceh4/zephyr-7b-beta:free"
+        "deepseek/deepseek-r1:free"
     )
     
     var expanded by remember { mutableStateOf(false) }

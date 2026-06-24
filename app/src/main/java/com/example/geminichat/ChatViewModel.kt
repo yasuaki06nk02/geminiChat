@@ -230,7 +230,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             try {
                 val prompt = "以下のメッセージの内容を30文字以内で要約してタイトルにしてください。余計な説明は不要です：\n$firstMessage"
                 val responseText = if (isOpenRouter()) {
-                    callOpenRouter(prompt)
+                    callOpenRouter(listOf(OpenRouterMessage(role = "user", content = prompt)))
                 } else {
                     generativeModel.generateContent(prompt).text
                 }
@@ -245,13 +245,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    private suspend fun callOpenRouter(text: String): String? {
-        val history = _messages.map { 
-            OpenRouterMessage(role = if (it.isUser) "user" else "assistant", content = it.text)
-        }
+    private suspend fun callOpenRouter(messages: List<OpenRouterMessage>): String? {
         val request = OpenRouterRequest(
             model = _modelName,
-            messages = history + OpenRouterMessage(role = "user", content = text)
+            messages = messages
         )
         val response = openRouterApi.getCompletion(
             auth = "Bearer $_openRouterApiKey",
@@ -273,7 +270,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 val responseText = if (isOpenRouter()) {
-                    callOpenRouter(text) ?: "Error: No response"
+                    val history = _messages.map { 
+                        OpenRouterMessage(role = if (it.isUser) "user" else "assistant", content = it.text)
+                    }
+                    callOpenRouter(history) ?: "Error: No response"
                 } else {
                     val response = if (bitmap != null) {
                         val inputContent = content {
