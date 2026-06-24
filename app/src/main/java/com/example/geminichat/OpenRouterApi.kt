@@ -22,6 +22,15 @@ data class OpenRouterChoice(
     val message: OpenRouterMessage
 )
 
+data class OpenRouterErrorResponse(
+    val error: OpenRouterError
+)
+
+data class OpenRouterError(
+    val message: String,
+    val code: Int
+)
+
 interface OpenRouterApi {
     @POST("chat/completions")
     suspend fun getCompletion(

@@ -19,8 +19,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import com.google.gson.Gson
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -246,15 +248,28 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     }
 
     private suspend fun callOpenRouter(messages: List<OpenRouterMessage>): String? {
-        val request = OpenRouterRequest(
-            model = _modelName,
-            messages = messages
-        )
-        val response = openRouterApi.getCompletion(
-            auth = "Bearer $_openRouterApiKey",
-            request = request
-        )
-        return response.choices.firstOrNull()?.message?.content
+        return try {
+            val request = OpenRouterRequest(
+                model = _modelName,
+                messages = messages
+            )
+            val response = openRouterApi.getCompletion(
+                auth = "Bearer $_openRouterApiKey",
+                request = request
+            )
+            response.choices.firstOrNull()?.message?.content
+        } catch (e: HttpException) {
+            val errorBody = e.response()?.errorBody()?.string()
+            val errorMessage = try {
+                val errorResponse = Gson().fromJson(errorBody, OpenRouterErrorResponse::class.java)
+                errorResponse.error.message
+            } catch (parseException: Exception) {
+                e.message()
+            }
+            "Error $errorMessage"
+        } catch (e: Exception) {
+            "Error: ${e.localizedMessage}"
+        }
     }
 
     fun sendMessage(text: String, bitmap: Bitmap? = null, onResponse: (String) -> Unit = {}) {
@@ -270,10 +285,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 val responseText = if (isOpenRouter()) {
-                    val history = _messages.map { 
+                    val history = _messages.dropLast(1).map { 
                         OpenRouterMessage(role = if (it.isUser) "user" else "assistant", content = it.text)
                     }
-                    callOpenRouter(history) ?: "Error: No response"
+                    callOpenRouter(history + OpenRouterMessage(role = "user", content = text)) ?: "Error: No response"
                 } else {
                     val response = if (bitmap != null) {
                         val inputContent = content {

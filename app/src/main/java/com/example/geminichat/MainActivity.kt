@@ -375,7 +375,7 @@ fun SettingsDialog(
     val openRouterModels = listOf(
         "google/gemma-4-31b-it:free",
         "google/gemma-2-9b-it:free",
-        "meta-llama/llama-3.3-70b:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
         "mistralai/mistral-small-3.1-24b:free",
         "qwen/qwen-2-7b-instruct:free",
         "deepseek/deepseek-r1:free"
