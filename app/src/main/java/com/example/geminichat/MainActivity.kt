@@ -24,8 +24,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -100,6 +102,7 @@ fun ChatScreen(
     val isTtsEnabled by viewModel.isTtsEnabled.collectAsState()
     val currentModel by viewModel.currentModel.collectAsState()
     val customApiKey by viewModel.customApiKey.collectAsState()
+    val openRouterApiKey by viewModel.openRouterApiKeyFlow.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -347,8 +350,10 @@ fun ChatScreen(
             onTtsToggle = { viewModel.setTtsEnabled(it) },
             currentModel = currentModel,
             onModelChange = { viewModel.setModel(it) },
-            apiKey = customApiKey,
-            onApiKeyChange = { viewModel.setApiKey(it) },
+            geminiApiKey = customApiKey,
+            onGeminiApiKeyChange = { viewModel.setApiKey(it) },
+            openRouterApiKey = openRouterApiKey,
+            onOpenRouterApiKeyChange = { viewModel.setOpenRouterApiKey(it) },
             onDismiss = { showSettings = false }
         )
     }
@@ -360,26 +365,39 @@ fun SettingsDialog(
     onTtsToggle: (Boolean) -> Unit,
     currentModel: String,
     onModelChange: (String) -> Unit,
-    apiKey: String,
-    onApiKeyChange: (String) -> Unit,
+    geminiApiKey: String,
+    onGeminiApiKeyChange: (String) -> Unit,
+    openRouterApiKey: String,
+    onOpenRouterApiKeyChange: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val models = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview")
+    val geminiModels = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview")
+    val openRouterModels = listOf(
+        "google/gemma-2-9b-it:free",
+        "mistralai/mistral-7b-instruct:free",
+        "microsoft/phi-3-mini-128k-instruct:free",
+        "meta-llama/llama-3-8b-instruct:free",
+        "qwen/qwen-2-7b-instruct:free",
+        "huggingfaceh4/zephyr-7b-beta:free"
+    )
+    
     var expanded by remember { mutableStateOf(false) }
-    var tempApiKey by remember { mutableStateOf(apiKey) }
+    var tempGeminiApiKey by remember { mutableStateOf(geminiApiKey) }
+    var tempOpenRouterApiKey by remember { mutableStateOf(openRouterApiKey) }
+    var customModelName by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("設定") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("音声読み上げ", modifier = Modifier.weight(1f))
                     Switch(checked = isTtsEnabled, onCheckedChange = onTtsToggle)
                 }
                 
                 Column {
-                    Text("Gemini モデル", style = MaterialTheme.typography.labelMedium)
+                    Text("モデル選択", style = MaterialTheme.typography.labelMedium)
                     Box {
                         OutlinedButton(
                             onClick = { expanded = true },
@@ -388,32 +406,53 @@ fun SettingsDialog(
                             Text(currentModel)
                         }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            models.forEach { model ->
-                                DropdownMenuItem(
-                                    text = { Text(model) },
-                                    onClick = {
-                                        onModelChange(model)
-                                        expanded = false
-                                    }
-                                )
+                            Text("Gemini", modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            geminiModels.forEach { model ->
+                                DropdownMenuItem(text = { Text(model) }, onClick = { onModelChange(model); expanded = false })
+                            }
+                            HorizontalDivider()
+                            Text("OpenRouter (Free)", modifier = Modifier.padding(8.dp), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            openRouterModels.forEach { model ->
+                                DropdownMenuItem(text = { Text(model) }, onClick = { onModelChange(model); expanded = false })
                             }
                         }
+                    }
+                    
+                    OutlinedTextField(
+                        value = customModelName,
+                        onValueChange = { customModelName = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        placeholder = { Text("カスタムモデル名を入力") },
+                        trailingIcon = {
+                            IconButton(onClick = { if (customModelName.isNotBlank()) onModelChange(customModelName) }) {
+                                Icon(Icons.Default.Check, contentDescription = "Apply")
+                            }
+                        }
+                    )
+                }
+
+                Column {
+                    Text("Gemini API キー", style = MaterialTheme.typography.labelMedium)
+                    OutlinedTextField(
+                        value = tempGeminiApiKey,
+                        onValueChange = { tempGeminiApiKey = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Button(onClick = { onGeminiApiKeyChange(tempGeminiApiKey) }, modifier = Modifier.align(Alignment.End).padding(top = 4.dp)) {
+                        Text("保存")
                     }
                 }
 
                 Column {
-                    Text("API キー", style = MaterialTheme.typography.labelMedium)
+                    Text("OpenRouter API キー", style = MaterialTheme.typography.labelMedium)
                     OutlinedTextField(
-                        value = tempApiKey,
-                        onValueChange = { tempApiKey = it },
+                        value = tempOpenRouterApiKey,
+                        onValueChange = { tempOpenRouterApiKey = it },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = { Text("API Keyを入力") }
+                        singleLine = true
                     )
-                    Button(
-                        onClick = { onApiKeyChange(tempApiKey) },
-                        modifier = Modifier.align(Alignment.End).padding(top = 8.dp)
-                    ) {
+                    Button(onClick = { onOpenRouterApiKeyChange(tempOpenRouterApiKey) }, modifier = Modifier.align(Alignment.End).padding(top = 4.dp)) {
                         Text("保存")
                     }
                 }

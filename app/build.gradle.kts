@@ -28,6 +28,7 @@ android {
             properties.load(propertiesFile.inputStream())
         }
         buildConfigField("String", "GEMINI_API_KEY", "\"${properties.getProperty("GEMINI_API_KEY") ?: ""}\"")
+        buildConfigField("String", "OPEN_ROUTER_API_KEY", "\"${properties.getProperty("OPEN_ROUTER_API_KEY") ?: ""}\"")
     }
 
     buildTypes {
@@ -61,6 +62,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.generativeai)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.okhttp.logging)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

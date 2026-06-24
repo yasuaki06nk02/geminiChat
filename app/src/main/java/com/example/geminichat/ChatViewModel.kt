@@ -17,6 +17,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,8 +48,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     private val ttsEnabledKey = booleanPreferencesKey("tts_enabled")
     private val modelNameKey = stringPreferencesKey("model_name")
     private val apiKeyKey = stringPreferencesKey("api_key")
+    private val openRouterApiKeyKey = stringPreferencesKey("open_router_api_key")
 
     private var _apiKey = BuildConfig.GEMINI_API_KEY
+    private var _openRouterApiKey = BuildConfig.OPEN_ROUTER_API_KEY
     private var _modelName = "gemini-2.5-flash"
     
     private val _isTtsEnabled = MutableStateFlow(true)
@@ -57,12 +63,26 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     private val _customApiKey = MutableStateFlow(_apiKey)
     val customApiKey = _customApiKey.asStateFlow()
 
+    private val _openRouterApiKeyFlow = MutableStateFlow(_openRouterApiKey)
+    val openRouterApiKeyFlow = _openRouterApiKeyFlow.asStateFlow()
+
     private var generativeModel = GenerativeModel(
         modelName = _modelName,
         apiKey = _apiKey
     )
 
     private var chat = generativeModel.startChat()
+
+    private val openRouterApi: OpenRouterApi by lazy {
+        val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY }
+        val client = OkHttpClient.Builder().addInterceptor(logging).build()
+        Retrofit.Builder()
+            .baseUrl("https://openrouter.ai/api/v1/")
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(OpenRouterApi::class.java)
+    }
 
     private val _sessions = mutableStateListOf<ChatSession>()
     val sessions: List<ChatSession> = _sessions
@@ -96,18 +116,29 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 updateModel()
             }
         }
+        viewModelScope.launch {
+            context.dataStore.data.map { it[openRouterApiKeyKey] ?: _openRouterApiKey }.collect {
+                _openRouterApiKey = it
+                _openRouterApiKeyFlow.value = it
+            }
+        }
     }
 
     private fun updateModel() {
-        generativeModel = GenerativeModel(
-            modelName = _modelName,
-            apiKey = _apiKey
-        )
-        // Re-initialize chat
-        val history = _messages.map {
-            content(role = if (it.isUser) "user" else "model") { text(it.text) }
+        if (!isOpenRouter()) {
+            generativeModel = GenerativeModel(
+                modelName = _modelName,
+                apiKey = _apiKey
+            )
+            val history = _messages.map {
+                content(role = if (it.isUser) "user" else "model") { text(it.text) }
+            }
+            chat = generativeModel.startChat(history = history)
         }
-        chat = generativeModel.startChat(history = history)
+    }
+
+    private fun isOpenRouter(): Boolean {
+        return _modelName.contains("/") || _modelName.endsWith(":free")
     }
 
     fun setTtsEnabled(enabled: Boolean) {
@@ -128,13 +159,19 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    fun setOpenRouterApiKey(apiKey: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { it[openRouterApiKeyKey] = apiKey }
+        }
+    }
+
     fun createNewSession() {
         if (_messages.isNotEmpty() && _currentSessionId.value != null) {
             updateCurrentSessionInList()
         }
         _messages.clear()
         _currentSessionId.value = UUID.randomUUID().toString()
-        chat = generativeModel.startChat()
+        if (!isOpenRouter()) chat = generativeModel.startChat()
     }
 
     fun selectSession(sessionId: String) {
@@ -149,10 +186,12 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         _messages.addAll(session.messages)
         _currentSessionId.value = sessionId
         
-        val history = session.messages.map { 
-            content(role = if (it.isUser) "user" else "model") { text(it.text) }
+        if (!isOpenRouter()) {
+            val history = session.messages.map { 
+                content(role = if (it.isUser) "user" else "model") { text(it.text) }
+            }
+            chat = generativeModel.startChat(history = history)
         }
-        chat = generativeModel.startChat(history = history)
     }
 
     fun deleteSession(sessionId: String) {
@@ -160,7 +199,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         if (_currentSessionId.value == sessionId) {
             _messages.clear()
             _currentSessionId.value = null
-            chat = generativeModel.startChat()
+            if (!isOpenRouter()) chat = generativeModel.startChat()
         }
     }
 
@@ -190,8 +229,12 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         viewModelScope.launch {
             try {
                 val prompt = "以下のメッセージの内容を30文字以内で要約してタイトルにしてください。余計な説明は不要です：\n$firstMessage"
-                val response = generativeModel.generateContent(prompt)
-                val summary = response.text?.trim()?.removeSurrounding("\"") ?: firstMessage.take(20)
+                val responseText = if (isOpenRouter()) {
+                    callOpenRouter(prompt)
+                } else {
+                    generativeModel.generateContent(prompt).text
+                }
+                val summary = responseText?.trim()?.removeSurrounding("\"") ?: firstMessage.take(20)
                 
                 val index = _sessions.indexOfFirst { it.id == sessionId }
                 if (index != -1) {
@@ -200,6 +243,21 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             } catch (e: Exception) {
             }
         }
+    }
+
+    private suspend fun callOpenRouter(text: String): String? {
+        val history = _messages.map { 
+            OpenRouterMessage(role = if (it.isUser) "user" else "assistant", content = it.text)
+        }
+        val request = OpenRouterRequest(
+            model = _modelName,
+            messages = history + OpenRouterMessage(role = "user", content = text)
+        )
+        val response = openRouterApi.getCompletion(
+            auth = "Bearer $_openRouterApiKey",
+            request = request
+        )
+        return response.choices.firstOrNull()?.message?.content
     }
 
     fun sendMessage(text: String, bitmap: Bitmap? = null, onResponse: (String) -> Unit = {}) {
@@ -214,17 +272,21 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val response = if (bitmap != null) {
-                    val inputContent = content {
-                        image(bitmap)
-                        text(text)
-                    }
-                    generativeModel.generateContent(inputContent)
+                val responseText = if (isOpenRouter()) {
+                    callOpenRouter(text) ?: "Error: No response"
                 } else {
-                    chat.sendMessage(text)
+                    val response = if (bitmap != null) {
+                        val inputContent = content {
+                            image(bitmap)
+                            text(text)
+                        }
+                        generativeModel.generateContent(inputContent)
+                    } else {
+                        chat.sendMessage(text)
+                    }
+                    response.text ?: "Error: No response"
                 }
 
-                val responseText = response.text ?: "Error: No response"
                 _messages.add(ChatMessage(responseText, false))
                 updateCurrentSessionInList()
                 onResponse(responseText)
