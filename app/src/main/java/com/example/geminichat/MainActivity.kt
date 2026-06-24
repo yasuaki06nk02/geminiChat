@@ -222,7 +222,16 @@ fun ChatScreen(
             modifier = Modifier.fillMaxSize(),
             topBar = {
                 TopAppBar(
-                    title = { Text("Gemini Chat") },
+                    title = {
+                        Column {
+                            Text("Gemini Chat", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = "Model: $currentModel",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
                             Icon(Icons.Default.Menu, contentDescription = "Menu")
