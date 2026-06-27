@@ -383,11 +383,11 @@ fun SettingsDialog(
     val geminiModels = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3-flash-preview")
     val openRouterModels = listOf(
         "google/gemma-4-31b-it:free",
-        "google/gemma-2-9b-it:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "openai/gpt-oss-120b:free",
+        "qwen/qwen3-next-80b-a3b-instruct:free",
         "meta-llama/llama-3.3-70b-instruct:free",
-        "mistralai/mistral-small-3.1-24b:free",
-        "qwen/qwen-2-7b-instruct:free",
-        "deepseek/deepseek-r1:free"
+        "openrouter/free"
     )
     
     var expanded by remember { mutableStateOf(false) }

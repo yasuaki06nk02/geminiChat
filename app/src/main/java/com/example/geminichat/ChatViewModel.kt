@@ -13,6 +13,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
+import com.google.gson.Gson
+import io.objectbox.Box
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
@@ -22,7 +24,6 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import com.google.gson.Gson
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,7 +74,14 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         apiKey = _apiKey
     )
 
+    private val embeddingModel = GenerativeModel(
+        modelName = "text-embedding-004",
+        apiKey = _apiKey
+    )
+
     private var chat = generativeModel.startChat()
+
+    private val memoryBox: Box<Memory> = ObjectBox.store.boxFor(Memory::class.java)
 
     private val openRouterApi: OpenRouterApi by lazy {
         val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY }
@@ -119,7 +127,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             }
         }
         viewModelScope.launch {
-            context.dataStore.data.map { it[openRouterApiKeyKey] ?: _openRouterApiKey }.collect {
+            context.dataStore.data.map { it[openRouterApiKeyKey] ?: BuildConfig.OPEN_ROUTER_API_KEY }.collect {
                 _openRouterApiKey = it
                 _openRouterApiKeyFlow.value = it
             }
@@ -272,6 +280,39 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
+    private suspend fun getLongTermMemory(query: String): String {
+        return try {
+            val embeddingResponse = embeddingModel.embedContent(query)
+            val queryVector = embeddingResponse.embedding.values.toFloatArray()
+            
+            // Find top 3 most similar memories using ObjectBox Vector Search
+            val relatedMemories = memoryBox.query()
+                .nearestNeighbors(Memory_.embedding, queryVector, 3)
+                .build()
+                .find()
+            
+            if (relatedMemories.isEmpty()) ""
+            else {
+                "\n\n[関連する過去の会話の記憶]:\n" + relatedMemories.joinToString("\n") { 
+                    "- ${if(it.role == "user") "ユーザー" else "AI"}: ${it.text}"
+                }
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun saveMemory(text: String, role: String) {
+        viewModelScope.launch {
+            try {
+                val embeddingResponse = embeddingModel.embedContent(text)
+                val vector = embeddingResponse.embedding.values.toFloatArray()
+                memoryBox.put(Memory(text = text, role = role, embedding = vector))
+            } catch (e: Exception) {
+            }
+        }
+    }
+
     fun sendMessage(text: String, bitmap: Bitmap? = null, onResponse: (String) -> Unit = {}) {
         if (text.isBlank() && bitmap == null) return
         
@@ -282,27 +323,33 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         _messages.add(ChatMessage(text, true, bitmap))
         _isLoading.value = true
 
+        saveMemory(text, "user")
+
         viewModelScope.launch {
             try {
+                val memoryContext = getLongTermMemory(text)
+                val augmentedPrompt = if (memoryContext.isNotEmpty()) text + memoryContext else text
+
                 val responseText = if (isOpenRouter()) {
                     val history = _messages.dropLast(1).map { 
                         OpenRouterMessage(role = if (it.isUser) "user" else "assistant", content = it.text)
                     }
-                    callOpenRouter(history + OpenRouterMessage(role = "user", content = text)) ?: "Error: No response"
+                    callOpenRouter(history + OpenRouterMessage(role = "user", content = augmentedPrompt)) ?: "Error: No response"
                 } else {
                     val response = if (bitmap != null) {
                         val inputContent = content {
                             image(bitmap)
-                            text(text)
+                            text(augmentedPrompt)
                         }
                         generativeModel.generateContent(inputContent)
                     } else {
-                        chat.sendMessage(text)
+                        chat.sendMessage(augmentedPrompt)
                     }
                     response.text ?: "Error: No response"
                 }
 
                 _messages.add(ChatMessage(responseText, false))
+                saveMemory(responseText, "model")
                 updateCurrentSessionInList()
                 onResponse(responseText)
             } catch (e: Exception) {

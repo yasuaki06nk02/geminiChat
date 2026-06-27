@@ -5,13 +5,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+apply(plugin = "org.jetbrains.kotlin.kapt")
+apply(plugin = "io.objectbox")
+
 android {
     namespace = "com.example.geminichat"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.geminichat"
@@ -33,9 +32,8 @@ android {
 
     buildTypes {
         release {
-            optimization {
-                enable = false
-            }
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
     compileOptions {
@@ -62,6 +60,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.generativeai)
+    implementation(libs.objectbox.kotlin)
+    val kapt by configurations.creating
+    dependencies.add("kapt", libs.objectbox.processor)
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
     implementation(libs.okhttp.logging)
